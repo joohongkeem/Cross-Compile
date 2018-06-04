@@ -1,0 +1,158 @@
+- 라즈베리 파이에서 커널을 컴파일 하는 방법은 2가지이다
+	1. 라즈베리파이에서 직접 하는 LOCAL BUILDING
+	2. PC(Linux)에서 하는 CROSS-COMPILING
+	(커널은 크기도 커서 라즈베리파이에서 하면 너무 오래걸려서 별로지만,
+	 PC에 크로스 컴파일러를 설치하는 번거로움이 없다는 장점아닌 장점이 있다)
+
+	>> 커널을 컴파일 할때는 PC에서 크로스 컴파일링 하는것이 낫고,
+	     디바이스 드라이버를 테스트 할 때는 라즈베리파이에 직접 하는 것이 좋다.
+
+(크로스 컴파일러?)
+크로스 컴파일러(cross compiler)는 컴파일러가 실행되는 플랫폼이 아닌 다른 플랫폼에서 실행 가능한 코드를 
+생성할 수 있는 컴파일러이다. 크로스 컴파일러 툴은 임베디드 시스템 혹은 여러 플랫폼에서 실행파일을 
+생성하는데 사용된다. 이것은 운영 체제를 지원하지 않는 마이크로컨트롤러와 같이 컴파일이 실현 불가능한 
+플랫폼에 컴파일하는데 사용된다. 이것은 시스템이 사용하는데 하나 이상의 플랫폼을 쓰는 반가상화에 이 도구를 
+사용하는 것이 더 일반적이게 되었다
+
+ex) 
+x86의 시스템에서 gcc를 사용하여 컴파일을 하게 되면, 그 시스템에 맞는 x86의 바이너리가 생긴다.
+그러므로 타겟 보드에서 직접 응용프로그램이나 커널 컴파일을 할 수가 없다.
+이유는 저장 할 수 있는 디스크 공간이 매우 부족하기 때문이다.
+그래서 타겟용 커널 및 응용프로그램을 개발하기 위하여 호스트 시스템에 타겟용 크로스 컴파일 환경을 구축한다
+즉, x86머신에서 ARM용 바이너리 코드를 만들어주는 것이 크로스 컴파일러!    
+
+[LOCAL BUILDING] (라즈베리파이)
+
+#1. git과 bc 패키지를 설치한다
+	$ sudo apt-get install git bc
+
+#2. 라즈베리파이의 커널 소스를 다운받는다.
+	(2-1) git 사용
+	$ sudo git clone --depth=1 https://github.com/raspberrypi/linux.git
+	(2-2) wget 사용 
+	      (git에 비해 상대적으로 빠르지만, 최신 커널버전인지 잘 확인해야 한다.
+	       2018.06.04 기준 최신버전은 4.14버전)
+	$ sudo wget https://github.com/raspberrypi/linux/archive/rpi-4.14.y.tar.gz
+	$ sudo tar zxvf rpi-4.14.y.tar.gz
+	$ sudo mv linux-rpi-4.14.y /usr/src
+	$ cd /usr/src
+	$ sudo ln -s linux-rpi-4.14.y linux
+	(linux버전으로 소프트 링크를 걸면, 여러개 버전의 커널을 사용할 때 유용하다)
+	(다른 버전의 커널 작업시 링크되는 커널 버전만 다르게 하면 항상 linux라는 경로가 유지됨)
+
+#3. linux폴더로 이용하여, bcm2709_defconfig파일을 참조하여 커널 옵션을 설정한다.
+	$ cd linux
+	$ sudo make bcm2709_defconfig
+
+#4. menuconfig가 필요할때?
+	$ sudo apt-get install libncurses5-dev (필요에 따라 설치)
+	$ make menuconfig
+
+#5. 라즈베리파이에 있는 4개의 코어를 모두사용(2,3버전에서만 유효, 1은 싱글코어)하여 커널 컴파일을 진행한다.
+     컴파일된 이미지는 arch/arm/boot/ 폴더에 zImage라는 이름으로 생성이 된다.
+
+// j4 : 코어를 4개 활용하므로, 발열이 매우 심해지므로 시원한곳에서 잘 식혀가면서 컴파일 해야한다.
+// zImage : 커널 이미지
+// modules : 커널 모듈
+// dtbs : 디바이스 트리 파일
+	$ make -j4 zImage modules dtbs
+
+
+#6.
+	$ sudo make modules_install
+	$ cd /lib/modules 
+	$ uname -a : 현재 사용중인 커널 확인 가능
+// [출력결과] Linux Hongsberry 4.14.34-v7+ #1110 SMP Mon Apr 16 15:18:51 BST 2018 armv7l GNU/Linux
+// 현재 사용중인것이 4.14.34-v7이란것을 알 수 있다.
+// 4.14.44-v7을 설치했지만, 현재 사용중인 커널은 4.14.34-v7 ?!?! 이것을 바꿔주는 것이 아래 과정!!
+	$cd 4.14.44-v7
+	$ls -al
+// [출력결과] build -> /usr/src/linux-rpi-4.14.y 을 보면 4.14를 쓰고있다!!
+	$cd kernel/drivers/char/broadcom
+	$ls
+// [출력결과] bcm2835_smi_dev.ko
+
+
+
+#7. 이 것을, /boot/폴더에 zImage_0601.img파일로 복사한다.
+     ( 컴파일한 zImage, modules,  파일을 /boot/폴더에 복사하여 넣어준다.)
+	$ cd /usr/src/linux
+	$ sudo cp arch/arm/boot/dts/*.dtb /boot/
+	$ sudo cp arch/arm/boot/dts/overlays/*.dtb* /boot/overlays/
+	$ sudo cp arch/arm/boot/dts/overlays/README /boot/overlays/
+	$ sudo cp arch/arm/boot/zImage /boot/zImage_0601.img
+	$ cd /boot
+	$ sudo vim config.txt
+	(맨 아랫줄에) kernel=zImage_0601.img(저장후 종료)
+// 복사한 커널 이미지를 커널로 실행할 것이라는 것을 명시하는 것
+	$ reboot
+
+#8. 복사한 커널 이미지로 잘 부팅되었는지 확인한다
+	$ uname -a
+// [출력결과] Linux Hongsberry 4.14.44-v7 #1 SMP Fri Jun 1 15:04:31 KST 2018 armv7l GNU/Linux
+// >> 아까랑 비교해보면 v.4.14.34에서 v.4.14.44로 바뀌었음을 확인할 수 있다.
+
+
+[CROSS-COMPILING] (PC, 우분투에서 실행)
+
+#0. 기존에 설치되어 있던 링크를 삭제한다
+	$ cd /usr/src
+	$ sudo rm linux
+	$ sudo rm -rf linux-rpi-4.14.y/
+
+#1. 툴체인 설치
+	$ git clone https://github.com/raspberrypi/tools ~/tools
+	$ echo PATH=\$PATH:~tools/arm-bcm2708/gcc-linaro-arm-linux-gnueabihf-raspbian-x64/bin >> ~/.bashrc
+	$ source ~/.bashrc
+
+#2. 라즈베리파이 커널 소스 다운로드
+	$ cd /usr/src
+	$ sudo git clone --depth=1 https://github.com/raspberrypi/linux
+
+#3. 소스를 빌드한다.
+	$ cd linux
+	$ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- bcm2709_defconfig
+	$ make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- zImage modules dtbs
+
+
+#4. 라즈베리파이의 microSD카드를 PC에 연결한다.
+     가상머신을 사용중이므로, PC에 연결한 후 Ubuntu에서 장치 - USB - 해당하는 USB 체크
+	$ lsblk
+// 자동으로 마운트하기 때문에 sdb1이 /media/joohong/boot 에 
+//			    sdb2가 /media/joohong/rootfs 에 자동으로 마운트 된 것을 알 수 있다.
+// 라즈베리파이는 /mnt/를 사용하기를 권장하기 때문에, 해당하는 디렉토리를 만들고, 마운트 된것을 언마운트 한 후
+// 해당하는 경로에 다시 마운트를 해준다.
+	(최상위 디렉토리 에서)
+	$ sudo umount /media/joohong/boot
+	$ sudo umount /media/joohong/rootfs
+	$ mkdir mnt
+	$ mkdir mnt/fat32
+	$ mkdir mnt/ext4
+	$ sudo mount /dev/sdb1 mnt/fat32
+	$ sudo mount /dev/sdb2 mnt/ext4
+
+#5. PC의 모듈을 마운트된 라즈베리파이(/mnt/ext4/)에 설치해준다.
+	$ cd ~/linux/
+	$ sudo make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=/mnt/ext4 modules_install
+
+#6. 커널 이미지와, 디바이스 트리 파일들을 복사해준다.
+	$ sudo cp /mnt/fat32/$KERNEL.img /mnt/fat32/$KERNEL-backup.img
+// 기존 라즈베리파이에 있던 커널이미지를 먼저 백업해준다.
+	$ sudo cp arch/arm/boot/zImage mnt/fat32/test.img
+	$ sudo cp arch/arm/boot/dts/*.dtb mnt/fat32/
+	$ sudo cp arch/arm/boot/dts/overlays/*.dtb* mnt/fat32/overlays/
+	$ sudo cp arch/arm/boot/dts/overlays/README mnt/fat32/overlays/
+// PC의 zImage, 디바이스 트리 파일들을 마운트된 라즈베리파이(/mnt/fat32/)에 복사한다.
+
+
+#7. 복사한 커널이미지를 커널로 사용할 수 있도록, config.txt 파일을 수정해준다.
+	$ cd /mnt/fat32/
+	$ sudo vim config.txt
+	(맨 아랫줄에)kernel=image.img(저장후 종료)
+	
+#8. 마운트 된 라즈베리파이를 언마운트 한 후, microSD를 다시 라즈베리파이에 연결하여 부팅한다.
+	$ sudo umount /mnt/fat32
+	$ sudo umount /mnt/ext4
+
+	
+	
